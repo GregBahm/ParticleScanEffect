@@ -1,0 +1,74 @@
+﻿#pragma kernel UpdateParticles
+
+struct ScanParticle
+{
+	float3 CurrentPos;
+	float3 Normal;
+	float Lifetime;
+	float RandomX;
+	float RandomY;
+};
+
+RWStructuredBuffer<ScanParticle> _DynamicData;
+Texture2D _RandomizerTexture;
+SamplerState sampler_RandomizerTexture;
+float _DeltaTime;
+float _Lifespan;
+float _Burstness;
+
+float3 _CursorPos;
+float3 _CursorUp;
+float3 _CursorRight; 
+float _Spread;
+
+float ModifyRandom(float val)
+{
+	return val;
+}
+
+float3 GetResetPosition(float randomX, float2 randomY)
+{
+	float3 xOffset = _CursorUp * ModifyRandom(randomX);
+	float3 yOffset = _CursorRight * ModifyRandom(randomY);
+	float3 offset = (xOffset + yOffset) * _Spread;
+	return _CursorPos + offset;
+}
+
+float3 GetUpdatedPosition(float3 oldPos)
+{
+	float3 diffToCursor = oldPos - _CursorPos;
+	float distToCursor = length(diffToCursor);
+	float weight = saturate(1 - distToCursor);
+	weight = pow(weight, 2);
+
+	weight *= 0.01;
+	float3 ret = lerp(oldPos, _CursorPos, weight);
+
+	float burstnessWeight = 1 - pow(saturate(_Burstness * 2), .1);
+	ret += diffToCursor * burstnessWeight * 0.05;
+	return ret;
+}
+
+[numthreads(128, 1, 1)]
+void UpdateParticles(uint3 id : SV_DispatchThreadID)
+{
+	ScanParticle oldVal = _DynamicData[id.x];
+
+	float time = oldVal.Lifetime - _DeltaTime;
+	float3 position = GetUpdatedPosition(oldVal.CurrentPos);
+	float3 normal = oldVal.Normal;
+	if (time < 0)
+	{
+		time += _Lifespan;
+		position = GetResetPosition(oldVal.RandomX, oldVal.RandomY);
+		normal = cross(_CursorUp, _CursorRight);
+	}
+
+	ScanParticle newVal;
+	newVal.CurrentPos = position;
+	newVal.Normal = normal;
+	newVal.Lifetime = time;
+	newVal.RandomX = oldVal.RandomX;
+	newVal.RandomY = oldVal.RandomY;
+	_DynamicData[id.x] = newVal;
+}
